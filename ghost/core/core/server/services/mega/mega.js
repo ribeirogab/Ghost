@@ -15,6 +15,7 @@ const db = require('../../data/db');
 const models = require('../../models');
 const postEmailSerializer = require('./post-email-serializer');
 const {getSegmentsFromHtml} = require('./segment-parser');
+const emailSuppressionList = require('../email-suppression-list');
 
 // Used to listen to email.added and email.edited model events originally, I think to offload this - ideally would just use jobs now if possible
 const events = require('../../lib/common/events');
@@ -555,7 +556,13 @@ async function createEmailBatches({emailModel, memberRows, memberSegment, option
 
     debug('createEmailBatches: storing recipient list');
     const startOfRecipientStorage = Date.now();
-    const batches = _.chunk(memberRows, bulkEmailService.BATCH_SIZE);
+    const emails = memberRows.map(row => row.email);
+    const emailSuppressionData = await emailSuppressionList.getBulkSuppressionData(emails);
+    const emailSuppressedLookup = _.zipObject(emails, emailSuppressionData);
+    const filteredRows = memberRows.filter((row) => {
+        return emailSuppressedLookup[row.email].suppressed === false;
+    });
+    const batches = _.chunk(filteredRows, bulkEmailService.BATCH_SIZE);
     const batchIds = await Promise.mapSeries(batches, storeRecipientBatch);
     debug(`createEmailBatches: stored recipient list (${Date.now() - startOfRecipientStorage}ms)`);
     logging.info(`[createEmailBatches] stored recipient list (${Date.now() - startOfRecipientStorage}ms)`);
